@@ -1,3 +1,4 @@
+#include "sdkconfig.h"
 #include "mcp251xfd.h"
 #include "dbc/dbc_generated.h"
 #include "esp_log.h"
@@ -299,12 +300,15 @@ static esp_err_t configure_fifos(mcp251xfd_ctx_t *ctx)
     esp_err_t err = write_reg32(ctx, REG_C1FIFOCON(1), rxfifo_con);
     if (err != ESP_OK) return err;
 
+#ifndef CONFIG_DASHKIT_CAN_READ_ONLY
     // FIFO 2: TX FIFO - 4 messages deep, 8 byte payload
     uint32_t txfifo_con = (0 << FIFOCON_PLSIZE_SHIFT) |  // 8 bytes payload
                           (3 << FIFOCON_FSIZE_SHIFT)  |   // 4 messages
                           FIFOCON_TXEN;                    // TX mode
     err = write_reg32(ctx, REG_C1FIFOCON(2), txfifo_con);
     if (err != ESP_OK) return err;
+
+#endif
 
     // ---- Hardware acceptance filtering ----
     const dbc_hw_filter_set_t *fs =
@@ -511,6 +515,7 @@ static esp_err_t iface_init(can_interface_t *self)
     return ESP_OK;
 }
 
+#ifndef CONFIG_DASHKIT_CAN_READ_ONLY
 static esp_err_t loopback_self_test(mcp251xfd_ctx_t *ctx)
 {
     // Internal + external loopback self-test
@@ -628,12 +633,16 @@ static esp_err_t loopback_self_test(mcp251xfd_ctx_t *ctx)
     return ESP_OK;
 }
 
+#endif
+
 static esp_err_t iface_start(can_interface_t *self)
 {
     mcp251xfd_ctx_t *ctx = (mcp251xfd_ctx_t *)self->ctx;
 
-    // Run loopback self-test first
+#ifndef CONFIG_DASHKIT_CAN_READ_ONLY
+    // External loopback drives the bus, so omit both tests in read-only builds.
     loopback_self_test(ctx);
+#endif
 
     ctx->running = true;
 
@@ -682,13 +691,15 @@ static esp_err_t iface_start(can_interface_t *self)
     write_reg32(ctx, REG_C1BDIAG0, 0);
     write_reg32(ctx, REG_C1BDIAG1, 0);
 
-    // Normal CAN 2.0 mode: receives frames and is allowed to transmit
-    // (ACKs incoming frames and sends queued TX frames). Required for the
-    // BLE CAN TX characteristic to actually put frames on the bus.
-    // For passive monitoring only, change to OPMODE_LISTEN_ONLY.
+#ifdef CONFIG_DASHKIT_CAN_READ_ONLY
+    // Hardware enforces passive reception, including suppressing ACK/error bits.
+    esp_err_t err = set_mode(ctx, OPMODE_LISTEN_ONLY);
+    ESP_LOGI(TAG, "Bus %d: read-only CAN (listen only)", ctx->bus_id);
+#else
     esp_err_t err = set_mode(ctx, OPMODE_NORMAL_2_0);
+#endif
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Bus %d: failed to enter normal mode", ctx->bus_id);
+        ESP_LOGE(TAG, "Bus %d: failed to enter requested CAN mode", ctx->bus_id);
         return err;
     }
 
@@ -711,6 +722,11 @@ static esp_err_t iface_stop(can_interface_t *self)
 
 static esp_err_t iface_send(can_interface_t *self, const can_frame_t *frame)
 {
+#ifdef CONFIG_DASHKIT_CAN_READ_ONLY
+    (void)self;
+    (void)frame;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     mcp251xfd_ctx_t *ctx = (mcp251xfd_ctx_t *)self->ctx;
 
     // Check TX FIFO 2 has space
@@ -761,6 +777,7 @@ static esp_err_t iface_send(can_interface_t *self, const can_frame_t *frame)
     write_reg32(ctx, REG_C1FIFOCON(2), fifocon);
 
     return ESP_OK;
+#endif
 }
 
 static void iface_set_rx_callback(can_interface_t *self, can_rx_callback_t cb, void *user_ctx)

@@ -7,3 +7,4 @@ dependencies.lock
 .idea/
 .cache
 CLAUDE.md
+build-read-only/
