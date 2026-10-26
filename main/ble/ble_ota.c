@@ -255,6 +255,10 @@ static int ota_ctrl_access(uint16_t conn_handle, uint16_t attr_handle,
         return BLE_ATT_ERR_REQ_NOT_SUPPORTED;
     }
 
+    if (!ble_server_is_controller(conn_handle)) {
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
+    }
+
     uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
     if (len == 0) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
 
@@ -288,6 +292,10 @@ static int ota_data_access(uint16_t conn_handle, uint16_t attr_handle,
 
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
         return BLE_ATT_ERR_REQ_NOT_SUPPORTED;
+    }
+
+    if (!ble_server_is_controller(conn_handle)) {
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
     }
 
     uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
