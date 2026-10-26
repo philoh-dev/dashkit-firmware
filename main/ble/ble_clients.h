@@ -32,19 +32,11 @@ static inline bool ble_app_has_receivers(const ble_app_conn_t *conns)
     return false;
 }
 
-// Read-only peers remain receivers and can never become the controller.
-// Retain the current controller; otherwise promote an eligible receiver.
-static inline uint16_t ble_app_controller(const ble_app_conn_t *conns,
-                                          uint16_t current)
+// Write permission belongs to each connection, independently of subscriptions
+// and of the other client's role.
+static inline bool ble_app_can_write(const ble_app_conn_t *conn)
 {
-    uint16_t candidate = BLE_APP_NO_CONN;
-    for (size_t i = 0; i < BLE_APP_MAX_CONNS; i++) {
-        if (ble_app_can_receive(&conns[i]) && !conns[i].read_only) {
-            if (conns[i].handle == current) return current;
-            if (candidate == BLE_APP_NO_CONN) candidate = conns[i].handle;
-        }
-    }
-    return candidate;
+    return conn->handle != BLE_APP_NO_CONN && conn->encrypted && !conn->read_only;
 }
 
 // Validate a complete DashPilot CAN batch before sending any of its frames.

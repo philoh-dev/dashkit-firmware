@@ -20,16 +20,13 @@ esp_err_t ble_server_notify(const uint8_t *data, size_t len);
 // Check if a client is connected and subscribed to notifications
 bool ble_server_is_connected(void);
 
-// Get the controller handle (BLE_HS_CONN_HANDLE_NONE without a controller).
-uint16_t ble_server_get_conn_handle(void);
-
-// Only the controller may change filters, send commands, or perform OTA.
+// Encrypted clients may write unless they set their read-only flag.
 // Clients can always send PING or set their own BLE_READ_ONLY connection flag.
-bool ble_server_is_controller(uint16_t conn_handle);
+bool ble_server_can_write(uint16_t conn_handle);
 
 // Open a pairing window so one new (not-yet-bonded) device can pair. Called when
 // an already-paired device requests it. A free slot is used when available;
-// otherwise the non-controller is disconnected to make room.
+// otherwise another connection is disconnected to make room (preserving OTA).
 // The window auto-closes after a timeout or once a new device pairs. With no
 // bonds yet the device is always pairable, so this is only meaningful once at
 // least one device is bonded.

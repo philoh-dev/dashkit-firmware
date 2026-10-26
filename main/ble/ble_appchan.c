@@ -74,7 +74,7 @@ static int app_cmd_access(uint16_t conn_handle, uint16_t attr_handle,
         return BLE_ATT_ERR_REQ_NOT_SUPPORTED;
     }
 
-    if (!ble_server_is_controller(conn_handle)) {
+    if (!ble_server_can_write(conn_handle)) {
         return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
     }
 

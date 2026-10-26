@@ -88,8 +88,8 @@ typedef enum {
 
     // --- BLE connection role ---
     // Handled in the BLE layer, never queued or persisted. Exactly two bytes:
-    // [0x4F][1=read-only, 0=eligible for control]. Applies only to the sender.
-    // Read-only peers keep receiving data but are never promoted to controller.
+    // [0x4F][1=read-only, 0=read/write]. Applies only to the sender.
+    // Both peers may write unless they opt into read-only mode.
     VC_CMD_BLE_READ_ONLY = 0x4F,
 } vehicle_control_opcode_t;
 

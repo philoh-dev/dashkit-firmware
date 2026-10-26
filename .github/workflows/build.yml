@@ -97,7 +97,7 @@ jobs:
       - name: Run Tesla crypto known-answer tests
         run: bash tools/test/run_tesla_crypto_test.sh
 
-      - name: Run BLE controller and MTU tests
+      - name: Run BLE write-permission and MTU tests
         run: bash tools/test/run_ble_clients_test.sh
 
       - name: Run Tesla session/protocol round-trip tests (handshake/command/response)

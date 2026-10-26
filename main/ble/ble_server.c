@@ -72,8 +72,8 @@ static const ble_uuid128_t s_version_uuid = BLE_UUID128_INIT(
     0xE0, 0xB1, 0x00, 0xCA, 0x05, 0x00, 0xDA, 0xCA
 );
 
-// Two app connections share the CAN stream. The first subscriber controls the
-// bridge until it leaves; the other subscriber then takes over. The host pool
+// Two app connections share the CAN stream and can independently write unless
+// they opt into read-only mode. The host pool
 // also serves the independent Tesla central connection.
 #define MAX_CONNS BLE_APP_MAX_CONNS
 #if CONFIG_BT_NIMBLE_MAX_CONNECTIONS < (MAX_CONNS + CONFIG_DASHKIT_TESLA_BLE)
@@ -84,7 +84,6 @@ typedef ble_app_conn_t conn_slot_t;
 _Static_assert(BLE_APP_NO_CONN == BLE_HS_CONN_HANDLE_NONE, "Connection sentinel mismatch");
 
 static conn_slot_t s_conns[MAX_CONNS];
-static volatile uint16_t s_active_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t s_chr_val_handle;
 
 // A connection that has not established encryption within this time is dropped,
@@ -197,19 +196,6 @@ static int conn_count(void)
     return n;
 }
 
-// Keep the controller while it is encrypted and subscribed. A second device
-// subscribing (or restoring its CCCD) must not take control away from it.
-static void update_active(void)
-{
-    uint16_t new_active = ble_app_controller(s_conns, s_active_handle);
-    if (new_active != s_active_handle) {
-        // A transfer belongs to the departing controller, never its successor.
-        ble_ota_on_disconnect();
-        ESP_LOGI(TAG, "Active connection: %d -> %d", s_active_handle, new_active);
-        s_active_handle = new_active;
-    }
-}
-
 // Drops links that never encrypted and links whose app stopped pinging.
 static void conn_check_cb(void *arg)
 {
@@ -224,8 +210,8 @@ static void conn_check_cb(void *arg)
         // DISCONNECT): free the slot or a full table keeps advertising off.
         if (ble_gap_conn_find(s->handle, NULL) != 0) {
             ESP_LOGW(TAG, "Reaped stale slot %d (handle=%d)", i, s->handle);
+            ble_ota_on_disconnect(s->handle);
             s->handle = BLE_HS_CONN_HANDLE_NONE;
-            update_active();
             if (conn_count() == 0) {
                 can_filter_set(NULL, 0);
             }
@@ -243,7 +229,7 @@ static void conn_check_cb(void *arg)
         // App pings can lose the one-GATT-op-at-a-time race against OTA chunk
         // writes; never cull the updating phone mid-transfer. Refreshing the
         // ping clock also grants a fresh window after an aborted OTA.
-        if (s->handle == s_active_handle && ble_ota_is_in_progress()) {
+        if (ble_ota_is_owner(s->handle)) {
             s->last_ping_s = t;
             continue;
         }
@@ -329,12 +315,12 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
                  event->disconnect.conn.conn_handle, event->disconnect.reason);
         conn_slot_t *slot = slot_by_handle(event->disconnect.conn.conn_handle);
         if (slot) {
+            ble_ota_on_disconnect(slot->handle);
             slot->handle = BLE_HS_CONN_HANDLE_NONE;
             slot->encrypted = false;
             slot->subscribed = false;
             slot->peer_was_bonded = false;
             slot->ping_seen = false;
-            update_active();
             if (conn_count() == 0) {
                 // Reset the CAN filter to pass-through for the next client.
                 can_filter_set(NULL, 0);
@@ -356,7 +342,6 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
                 ESP_LOGI(TAG, "Notifications %s (handle=%d)",
                          slot->subscribed ? "enabled" : "disabled",
                          event->subscribe.conn_handle);
-                update_active();
             }
         }
         break;
@@ -436,9 +421,6 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
             slot->peer_was_bonded = true;
             close_pairing_window();
         }
-        // Bonded peers get their CCCD restored at encryption time.
-        update_active();
-
         // Allow 1M and 2M; the phone picks. Android pins 1M (2M caused MIC
         // failures, status 61); iOS moves to 2M.
         ble_gap_set_prefered_le_phy(ch,
@@ -508,14 +490,15 @@ static void start_advertising(void)
     }
 }
 
-void ble_server_enter_pairing_mode(void)
+static void enter_pairing_mode_for(uint16_t requester)
 {
     open_pairing_window();
-    // A free slot serves the new device; only when full drop a non-active link.
+    // Preserve the requesting phone and any ongoing firmware transfer.
     if (conn_count() >= MAX_CONNS) {
         for (int i = 0; i < MAX_CONNS; i++) {
             conn_slot_t *s = &s_conns[i];
-            if (s->handle != BLE_HS_CONN_HANDLE_NONE && s->handle != s_active_handle) {
+            if (s->handle != BLE_HS_CONN_HANDLE_NONE && s->handle != requester
+                && !ble_ota_is_owner(s->handle)) {
                 ESP_LOGI(TAG, "Pairing mode: dropping handle %d to free a slot",
                          s->handle);
                 ble_gap_terminate(s->handle, BLE_ERR_REM_USER_CONN_TERM);
@@ -525,6 +508,11 @@ void ble_server_enter_pairing_mode(void)
         }
     }
     start_advertising();
+}
+
+void ble_server_enter_pairing_mode(void)
+{
+    enter_pairing_mode_for(BLE_HS_CONN_HANDLE_NONE);
 }
 
 void ble_server_factory_reset(void)
@@ -584,7 +572,7 @@ static int gatt_filter_access(uint16_t conn_handle, uint16_t attr_handle,
         return BLE_ATT_ERR_UNLIKELY;
     }
 
-    if (!ble_server_is_controller(conn_handle)) {
+    if (!ble_server_can_write(conn_handle)) {
         return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
     }
 
@@ -663,7 +651,7 @@ static int gatt_control_access(uint16_t conn_handle, uint16_t attr_handle,
     }
 
     // Handled here, never queued: a full command queue must not drop a ping.
-    // Accepted from every connection, not just the active one.
+    // Accepted from every connection, including read-only devices.
     if (opcode == VC_CMD_PING) {
         conn_slot_t *slot = slot_by_handle(conn_handle);
         if (slot) {
@@ -681,7 +669,7 @@ static int gatt_control_access(uint16_t conn_handle, uint16_t attr_handle,
     }
 
     // A peer may mark its own connection read-only even before subscribing,
-    // and even while another peer controls the bridge. This is session state:
+    // independently of the other peer's role. This is session state:
     // reconnecting clients must resend it. Never queue it as a vehicle command.
     if (opcode == VC_CMD_BLE_READ_ONLY) {
         if (out_len != 2 || value > 1) {
@@ -692,16 +680,22 @@ static int gatt_control_access(uint16_t conn_handle, uint16_t attr_handle,
             return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
         }
         slot->read_only = (value != 0);
-        update_active();
+        if (slot->read_only) {
+            ble_ota_on_disconnect(conn_handle);
+        }
         ESP_LOGI(TAG, "Connection role: handle=%d read_only=%d", conn_handle, slot->read_only);
         return 0;
     }
 
-    // Only the active connection may drive the vehicle.
-    if (!ble_server_is_controller(conn_handle)) {
-        ESP_LOGW(TAG, "Control write 0x%02X from non-active handle %d rejected",
+    if (!ble_server_can_write(conn_handle)) {
+        ESP_LOGW(TAG, "Control write 0x%02X from read-only or unauthorized handle %d rejected",
                  opcode, conn_handle);
         return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
+    }
+
+    if (opcode == VC_CMD_ENTER_PAIRING) {
+        enter_pairing_mode_for(conn_handle);
+        return 0;
     }
 
     esp_err_t err = vehicle_control_submit(opcode, value);
@@ -933,19 +927,14 @@ esp_err_t ble_server_notify(const uint8_t *data, size_t len)
     return sent ? ESP_OK : result;
 }
 
-bool ble_server_is_controller(uint16_t conn_handle)
+bool ble_server_can_write(uint16_t conn_handle)
 {
-    return conn_handle != BLE_HS_CONN_HANDLE_NONE && conn_handle == s_active_handle;
+    conn_slot_t *slot = slot_by_handle(conn_handle);
+    return slot && ble_app_can_write(slot);
 }
 
 bool ble_server_is_connected(void)
 {
-    // A read-only subscriber still receives CAN data without a controller.
+    // A read-only subscriber still receives CAN data without any writers.
     return ble_app_has_receivers(s_conns);
-}
-
-// The active connection: OTA status notifications target it.
-uint16_t ble_server_get_conn_handle(void)
-{
-    return s_active_handle;
 }

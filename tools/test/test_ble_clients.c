@@ -7,54 +7,47 @@ static int test_ble_clients(void)
     ble_app_conn_t conns[2] = {
         {.handle = BLE_APP_NO_CONN}, {.handle = BLE_APP_NO_CONN}
     };
-    CHECK(ble_app_controller(conns, BLE_APP_NO_CONN) == BLE_APP_NO_CONN);
     CHECK(!ble_app_has_receivers(conns));
-    // Handle zero is valid. Neither encryption nor a subscription alone is enough.
+    CHECK(!ble_app_can_write(&conns[0]));
+    // Handle zero is valid, but an unencrypted subscriber cannot write.
     conns[0].handle = 0;
     conns[0].subscribed = true;
     CHECK(!ble_app_can_receive(&conns[0]));
-    CHECK(ble_app_controller(conns, BLE_APP_NO_CONN) == BLE_APP_NO_CONN);
+    CHECK(!ble_app_can_write(&conns[0]));
     conns[0].encrypted = true;
-    CHECK(ble_app_controller(conns, BLE_APP_NO_CONN) == 0);
+    CHECK(ble_app_can_write(&conns[0]));
     conns[1].handle = 7;
     conns[1].encrypted = true;
     CHECK(!ble_app_can_receive(&conns[1]));
+    CHECK(ble_app_can_write(&conns[1])); // Commands do not require a CAN subscription.
     conns[1].subscribed = true;
     CHECK(ble_app_can_receive(&conns[0]) && ble_app_can_receive(&conns[1]));
-    CHECK(ble_app_controller(conns, 0) == 0); // A second subscription cannot steal control.
-    CHECK(ble_app_controller(conns, 7) == 7); // Slot order cannot steal control either.
+    CHECK(ble_app_can_write(&conns[0]) && ble_app_can_write(&conns[1]));
     conns[0].subscribed = false;
-    CHECK(ble_app_controller(conns, 0) == 7);
+    CHECK(ble_app_can_write(&conns[0]) && ble_app_can_write(&conns[1]));
     conns[0].subscribed = true;
-    CHECK(ble_app_controller(conns, 7) == 7); // Resubscribe keeps the promoted controller.
     conns[1].handle = BLE_APP_NO_CONN;
-    CHECK(ble_app_controller(conns, 7) == 0);
+    CHECK(ble_app_can_write(&conns[0]) && !ble_app_can_write(&conns[1]));
     conns[0].encrypted = false;
-    CHECK(ble_app_controller(conns, 0) == BLE_APP_NO_CONN);
+    CHECK(!ble_app_can_write(&conns[0]));
 
-    // The first subscriber explicitly yields control; both keep receiving.
+    // Opting out affects only the sender; both keep receiving.
     conns[0].encrypted = true;
     conns[1].handle = 7;
     conns[0].read_only = true;
     CHECK(ble_app_can_receive(&conns[0]));
-    CHECK(ble_app_controller(conns, 0) == 7);
-    CHECK(ble_app_controller(conns, BLE_APP_NO_CONN) == 7);
+    CHECK(!ble_app_can_write(&conns[0]) && ble_app_can_write(&conns[1]));
     conns[1].handle = BLE_APP_NO_CONN;
-    CHECK(ble_app_controller(conns, 7) == BLE_APP_NO_CONN); // Never promote a read-only peer.
+    CHECK(!ble_app_can_write(&conns[0])); // An observer stays read-only when alone.
     CHECK(ble_app_has_receivers(conns)); // The remaining observer still streams.
     conns[1].handle = 7;
     conns[1].read_only = true;
-    CHECK(ble_app_controller(conns, 7) == BLE_APP_NO_CONN); // Both may opt out.
+    CHECK(!ble_app_can_write(&conns[0]) && !ble_app_can_write(&conns[1]));
     CHECK(ble_app_can_receive(&conns[0]) && ble_app_can_receive(&conns[1]));
     conns[0].read_only = false;
-    CHECK(ble_app_controller(conns, BLE_APP_NO_CONN) == 0);
+    CHECK(ble_app_can_write(&conns[0]) && !ble_app_can_write(&conns[1]));
     conns[1].read_only = false;
-    CHECK(ble_app_controller(conns, 0) == 0); // Clearing the flag cannot steal control.
-    conns[1].read_only = true;
-    conns[0].subscribed = false;
-    CHECK(ble_app_controller(conns, 0) == BLE_APP_NO_CONN);
-    conns[1].read_only = false;
-    CHECK(ble_app_controller(conns, BLE_APP_NO_CONN) == 7);
+    CHECK(ble_app_can_write(&conns[0]) && ble_app_can_write(&conns[1]));
 
     // Three wire frames, with timestamp/bus/address bytes distinct per frame.
     uint8_t batch[42] = {3};
