@@ -50,3 +50,4 @@ BMS_hvBusStatus           1 filter  # app: pack voltage / current
 BMS_bmbMinMax             1 filter  # app: pack temps
 DI_odometerStatus         1 filter  # app: odometer
 VIN_info                  1 filter  # app: VIN assembly (muxed VIN_A/B/C405 by VIN_infoIndex)
+UI_ambientLightingCtrls   1 filter  # app: interior strip RGB / brightness / section mask (0x679)
