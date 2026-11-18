@@ -1,4 +1,3 @@
-#include "sdkconfig.h"
 #include "mcp251xfd.h"
 #include "dbc/dbc_generated.h"
 #include "esp_log.h"
@@ -512,7 +511,6 @@ static esp_err_t iface_init(can_interface_t *self)
     return ESP_OK;
 }
 
-#if !CONFIG_DASHKIT_READ_ONLY
 static esp_err_t loopback_self_test(mcp251xfd_ctx_t *ctx)
 {
     // Internal + external loopback self-test
@@ -630,16 +628,12 @@ static esp_err_t loopback_self_test(mcp251xfd_ctx_t *ctx)
     return ESP_OK;
 }
 
-#endif
-
 static esp_err_t iface_start(can_interface_t *self)
 {
     mcp251xfd_ctx_t *ctx = (mcp251xfd_ctx_t *)self->ctx;
 
-    // The external-loopback test transmits on the physical bus.
-#if !CONFIG_DASHKIT_READ_ONLY
+    // Run loopback self-test first
     loopback_self_test(ctx);
-#endif
 
     ctx->running = true;
 
@@ -692,13 +686,9 @@ static esp_err_t iface_start(can_interface_t *self)
     // (ACKs incoming frames and sends queued TX frames). Required for the
     // BLE CAN TX characteristic to actually put frames on the bus.
     // For passive monitoring only, change to OPMODE_LISTEN_ONLY.
-#if CONFIG_DASHKIT_READ_ONLY
-    esp_err_t err = set_mode(ctx, OPMODE_LISTEN_ONLY);
-#else
     esp_err_t err = set_mode(ctx, OPMODE_NORMAL_2_0);
-#endif
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Bus %d: failed to enter operating mode", ctx->bus_id);
+        ESP_LOGE(TAG, "Bus %d: failed to enter normal mode", ctx->bus_id);
         return err;
     }
 
@@ -721,11 +711,6 @@ static esp_err_t iface_stop(can_interface_t *self)
 
 static esp_err_t iface_send(can_interface_t *self, const can_frame_t *frame)
 {
-#if CONFIG_DASHKIT_READ_ONLY
-    (void)self;
-    (void)frame;
-    return ESP_ERR_NOT_SUPPORTED;
-#else
     mcp251xfd_ctx_t *ctx = (mcp251xfd_ctx_t *)self->ctx;
 
     // Check TX FIFO 2 has space
@@ -776,7 +761,6 @@ static esp_err_t iface_send(can_interface_t *self, const can_frame_t *frame)
     write_reg32(ctx, REG_C1FIFOCON(2), fifocon);
 
     return ESP_OK;
-#endif
 }
 
 static void iface_set_rx_callback(can_interface_t *self, can_rx_callback_t cb, void *user_ctx)

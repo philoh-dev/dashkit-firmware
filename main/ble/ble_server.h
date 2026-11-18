@@ -20,9 +20,7 @@ esp_err_t ble_server_notify(const uint8_t *data, size_t len);
 // Check if a client is connected and subscribed to notifications
 bool ble_server_is_connected(void);
 
-// Encrypted clients may write unless they set their read-only flag.
-// Clients can always send PING or set their own BLE_READ_ONLY connection flag.
-// CONFIG_DASHKIT_READ_ONLY forces false and rejects clearing that flag.
+// Each encrypted app connection may write, without a CAN subscription.
 bool ble_server_can_write(uint16_t conn_handle);
 
 // Open a pairing window so one new (not-yet-bonded) device can pair. Called when

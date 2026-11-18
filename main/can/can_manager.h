@@ -25,5 +25,4 @@ esp_err_t can_manager_inject(const can_tagged_frame_t *frame);
 
 // Transmit a frame on the interface with the given bus_id.
 // Returns ESP_ERR_NOT_FOUND if no interface matches bus_id.
-// Permanent read-only builds always return ESP_ERR_NOT_SUPPORTED.
 esp_err_t can_manager_send(uint8_t bus_id, const can_frame_t *frame);
