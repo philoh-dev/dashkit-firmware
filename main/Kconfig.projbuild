@@ -8,6 +8,16 @@
 # BLE central role from the build, so the stack stays exactly as a
 # dashboard-only device expects it.
 menu "DashKit"
+    config DASHKIT_READ_ONLY
+        bool "Permanent read-only bridge"
+        default n
+        help
+            Forces all app connections read-only, rejects attempts to enable
+            writes, and runs CAN controllers in passive listen-only mode.
+            Vehicle commands, CAN filter changes, Tesla app commands and BLE
+            OTA writes are disabled. Authenticated local pairing management
+            remains available. USB flashing can replace this firmware.
+
     config DASHKIT_TESLA_BLE
         bool "Tesla BLE vehicle-command client"
         depends on BT_ENABLED && BT_NIMBLE_ENABLED
