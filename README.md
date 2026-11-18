@@ -64,11 +64,70 @@ received length and all bytes. RGB forwarding to a Rive dashboard has been
 confirmed working on a user's vehicle. Effect subdivisions, section labels,
 and compatibility with other vehicle/software variants remain unverified.
 
+## Two connected devices
+
+The write permissions below describe standard builds. The permanent read-only
+candidate described below overrides them for every app connection.
+
+Two paired app devices can receive CAN data simultaneously, alongside the
+independent Tesla BLE connection. Both encrypted app devices can send vehicle
+commands, configure the bridge, and initiate firmware updates independently.
+Writing does not require a CAN notification subscription.
+
+A device opts into read-only mode by writing **`4F 01`** (two bytes) to the
+encrypted control characteristic **CADA0004-CA00-B1E0-B0D6-C000AA0100A1**.
+Send this as soon as the link is encrypted. It immediately disables the sender's
+vehicle commands, CAN filter changes, Tesla enrollment commands, and OTA writes.
+Read-only devices continue receiving data, even if the other device leaves.
+
+Write **`4F 00`** to enable writes again. The flag applies only to the sender's current connection and
+must be sent again after every reconnect. Devices that omit the flag are
+read/write, preserving compatibility with existing apps. If both opt into
+read-only mode, neither can send commands.
+
+Both devices receive the same CAN stream using a shared CAN filter. Either
+writer can replace the filter; the latest accepted filter write wins.
+Each link uses its own negotiated MTU. Tesla status notifications go to every
+subscriber of the status characteristic, including devices without a CAN subscription.
+Keepalive pings and changes to a device's own read-only flag are accepted from
+both devices. Vehicle commands from either writer use the existing command queue.
+Firmware updates pause CAN streaming on both links. Only one OTA transfer can
+run at a time; its initiating device owns data writes, aborts, and status
+notifications. Other devices cannot replace or modify that transfer, and their
+disconnects do not abort it. The transfer aborts if its owner disconnects or
+marks itself read-only.
+
+Advertising continues until both app slots are occupied. To pair the second
+device, open the existing pairing window from either writer. If both slots
+are occupied, pairing mode disconnects the other device to make room unless
+that device owns an OTA transfer.
+
+Run the host regression tests with `bash tools/test/run_ble_clients_test.sh`.
+
+## Permanent read-only firmware
+
+Build permanent read-only firmware with `CONFIG_DASHKIT_READ_ONLY=y` using
+`sdkconfig.defaults;sdkconfig.read-only` in a separate build directory:
+
+```bash
+idf.py -B build-read-only -D SDKCONFIG=build-read-only/sdkconfig \
+  -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.read-only' build
+```
+
+Both app connections are
+read-only from connection setup; `4F 00` is rejected, including after reboot
+or reconnect. CAN runs in passive listen-only mode with transmit APIs disabled
+and the transmitting startup self-test skipped. All app vehicle commands,
+filter changes, Tesla app commands, and BLE OTA writes are rejected. Keepalive,
+`4F 01`, and the authenticated pairing-window command remain accepted, allowing
+a second dashboard to pair. Updates to this candidate require USB flashing.
+The existing two-app BLE streaming support is retained.
+
 ## More features
 
 - 🔑 **Tesla BLE key**: DashKit can enroll as a Tesla BLE key, with the car provisioned and paired from DashPilot. It reports presence, lock, sleep, charging and climate state to the app.
 - ⬆️ **OTA updates** from DashPilot. If a new image crash-loops, the device rolls back to the previous one.
-- 🔒 **Secure pairing**: only an already-paired phone can open a pairing window. Up to 3 phones can be bonded, with one active connection at a time.
+- 🔒 **Secure pairing**: only an already-paired phone can open a pairing window. Up to 8 phones can be bonded, with two app connections active at a time.
 - 🧹 **Factory reset**: hold 5 fingers on the center screen to clear all bonds and reboot.
 - 🔘 **BTHome buttons** (experimental): use a Shelly BLU button as a physical trigger, e.g. to open the glovebox.
 
@@ -147,6 +206,7 @@ Options under `idf.py menuconfig` → **DashKit**:
 
 | Option | Default | |
 |--------|---------|---|
+| `CONFIG_DASHKIT_READ_ONLY` | n | Permanent read-only bridge; updates require USB flashing |
 | `CONFIG_DASHKIT_TESLA_BLE` | y | Tesla BLE vehicle-command client |
 | `CONFIG_DASHKIT_BTHOME` | n | BTHome / Shelly BLU button listener |
 | `CONFIG_DASHKIT_BTHOME_ALLOWED` | "" | Comma-separated button addresses allowed to trigger controls (from the "BTHome device … seen" log line) |
