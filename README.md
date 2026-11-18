@@ -178,6 +178,25 @@ idf.py flash monitor
 
 Press `Ctrl+]` to exit the serial monitor.
 
+## Pull request firmware downloads
+
+Each pull request runs the **PR firmware / Downloadable firmware** check when
+opened, updated, or reopened. It builds the PR's head commit with the pinned
+ESP-IDF toolchain. Host regression tests continue running in the existing CI.
+
+1. Open the pull request's **Checks** tab.
+2. Open **PR firmware**, then follow **Details** to the workflow run.
+3. Use **Download firmware ZIP** in the run summary, or select the
+   `dashkit-pr-<number>-<commit>` artifact under **Artifacts**.
+4. Extract the ZIP and select **`dashkit-firmware.bin`** in the app's firmware
+   file picker. The **`dashkit-firmware-usb.bin`** image is for USB flashing at
+   address `0x0`.
+
+The ZIP also contains checksums and `build-info.json` with the PR number and
+source commit. The firmware reports version `pr-<number>-<commit>`. Downloads
+require signing in to GitHub and expire after 30 days. Each new PR commit gets
+its own artifact; use the latest successful run for the current code.
+
 ## GitHub releases
 
 Pushing a new tag (for example, `git push origin v0.3.2`) runs
