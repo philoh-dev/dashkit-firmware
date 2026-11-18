@@ -79,6 +79,29 @@ idf.py flash monitor
 
 Press `Ctrl+]` to exit the serial monitor.
 
+## GitHub releases
+
+Pushing a new tag (for example, `git push origin v0.3.2`) runs
+`.github/workflows/release.yml`. It builds the tagged source with the pinned
+ESP-IDF submodule and publishes both firmware variants to a GitHub release:
+
+- `dashkit-read-write.bin`: standard application binary for OTA updates.
+- `dashkit-read-only.bin`: permanent read-only application binary.
+- `dashkit-read-write-usb.bin` and `dashkit-read-only-usb.bin`: complete flash
+  images including the bootloader and partition table; flash the chosen image
+  at address `0x0` over USB.
+- `SHA256SUMS-read-write.txt` and `SHA256SUMS-read-only.txt`: binary checksums.
+
+The read-only firmware requires USB flashing for subsequent updates. The
+release is published only after both builds succeed. Build artifacts are also
+available on the workflow run for 14 days; release assets remain available
+until the release or assets are deleted. Re-running the workflow replaces the
+assets on an existing release for that tag.
+
+Release notes list commit subjects and short hashes since the nearest previous
+tag in the release commit's ancestry, oldest first. The first release includes
+the full commit history. Re-running the workflow also refreshes these notes.
+
 ## Debug Logging
 
 To enable verbose CAN frame and status logging, add to `sdkconfig.defaults`:
