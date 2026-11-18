@@ -87,11 +87,7 @@ typedef enum {
     // Config only, not persisted. value is ignored.
     VC_CMD_AC_SWING_TOGGLE = 0x4E,
 
-    // --- BLE connection role ---
-    // Handled in the BLE layer, never queued or persisted. Exactly two bytes:
-    // [0x4F][1=read-only, 0=read/write]. Applies only to the sender.
-    // Both peers may write unless they opt into read-only mode.
-    VC_CMD_BLE_READ_ONLY = 0x4F,
+    // 0x4F retired (former BLE connection role), don't reuse.
 
     // --- Door unlatch (VCSEC_requests 0x1F9) ---
     // Pops one door latch like the Tesla app's "Unlatch Door": the per-door

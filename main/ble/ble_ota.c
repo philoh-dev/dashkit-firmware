@@ -399,7 +399,7 @@ esp_err_t ble_ota_init(void)
 void ble_ota_on_disconnect(uint16_t conn_handle)
 {
     if (ble_ota_is_owner(conn_handle)) {
-        ESP_LOGW(TAG, "OTA owner disconnected or became read-only, aborting");
+        ESP_LOGW(TAG, "OTA owner disconnected, aborting");
         ota_cleanup();
     }
 }

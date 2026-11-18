@@ -73,9 +73,8 @@ static const ble_uuid128_t s_version_uuid = BLE_UUID128_INIT(
     0xE0, 0xB1, 0x00, 0xCA, 0x05, 0x00, 0xDA, 0xCA
 );
 
-// Two app connections share the CAN stream and can independently write unless
-// they opt into read-only mode. The host pool
-// also serves the independent Tesla central connection.
+// Two app connections share the CAN stream and can independently write.
+// The host pool also serves the independent Tesla central connection.
 #define MAX_CONNS BLE_APP_MAX_CONNS
 #if CONFIG_BT_NIMBLE_MAX_CONNECTIONS < (MAX_CONNS + CONFIG_DASHKIT_TESLA_BLE)
 #error "NimBLE needs two app connections plus one for the Tesla client"
@@ -177,11 +176,6 @@ static void slot_open(conn_slot_t *slot, uint16_t handle)
     slot->handle = handle;
     slot->encrypted = false;
     slot->subscribed = false;
-#if CONFIG_DASHKIT_READ_ONLY
-    slot->read_only = true;
-#else
-    slot->read_only = false;
-#endif
     slot->peer_was_bonded = ble_gap_conn_find(handle, &desc) == 0
                          && peer_is_bonded(&desc.peer_id_addr);
     slot->ping_seen = false;
@@ -656,7 +650,7 @@ static int gatt_control_access(uint16_t conn_handle, uint16_t attr_handle,
     }
 
     // Handled here, never queued: a full command queue must not drop a ping.
-    // Accepted from every connection, including read-only devices.
+    // Accepted from every connection.
     if (opcode == VC_CMD_PING) {
         conn_slot_t *slot = slot_by_handle(conn_handle);
         if (slot) {
@@ -673,41 +667,8 @@ static int gatt_control_access(uint16_t conn_handle, uint16_t attr_handle,
         return 0;
     }
 
-    // A peer may mark its own connection read-only even before subscribing,
-    // independently of the other peer's role. This is session state:
-    // reconnecting clients must resend it. Never queue it as a vehicle command.
-    if (opcode == VC_CMD_BLE_READ_ONLY) {
-        if (out_len != 2 || value > 1) {
-            return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-        }
-        conn_slot_t *slot = slot_by_handle(conn_handle);
-        if (!slot || !slot->encrypted) {
-            return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
-        }
-#if CONFIG_DASHKIT_READ_ONLY
-        if (value == 0) return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
-#endif
-        slot->read_only = (value != 0);
-        if (slot->read_only) {
-            ble_ota_on_disconnect(conn_handle);
-        }
-        ESP_LOGI(TAG, "Connection role: handle=%d read_only=%d", conn_handle, slot->read_only);
-        return 0;
-    }
-
-#if CONFIG_DASHKIT_READ_ONLY
-    // Local pairing management is needed to add the second dashboard. It
-    // never sends a vehicle command or changes the permanent write policy.
-    if (opcode == VC_CMD_ENTER_PAIRING) {
-        conn_slot_t *slot = slot_by_handle(conn_handle);
-        if (!slot || !slot->encrypted) return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
-        enter_pairing_mode_for(conn_handle);
-        return 0;
-    }
-#endif
-
     if (!ble_server_can_write(conn_handle)) {
-        ESP_LOGW(TAG, "Control write 0x%02X from read-only or unauthorized handle %d rejected",
+        ESP_LOGW(TAG, "Control write 0x%02X from unauthorized handle %d rejected",
                  opcode, conn_handle);
         return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
     }
@@ -948,17 +909,11 @@ esp_err_t ble_server_notify(const uint8_t *data, size_t len)
 
 bool ble_server_can_write(uint16_t conn_handle)
 {
-#if CONFIG_DASHKIT_READ_ONLY
-    (void)conn_handle;
-    return false;
-#else
     conn_slot_t *slot = slot_by_handle(conn_handle);
     return slot && ble_app_can_write(slot);
-#endif
 }
 
 bool ble_server_is_connected(void)
 {
-    // A read-only subscriber still receives CAN data without any writers.
     return ble_app_has_receivers(s_conns);
 }

@@ -31,22 +31,18 @@ static int test_ble_clients(void)
     conns[0].encrypted = false;
     CHECK(!ble_app_can_write(&conns[0]));
 
-    // Opting out affects only the sender; both keep receiving.
+    // Disconnecting either peer preserves the remaining encrypted receiver.
     conns[0].encrypted = true;
     conns[1].handle = 7;
-    conns[0].read_only = true;
-    CHECK(ble_app_can_receive(&conns[0]));
+    CHECK(ble_app_can_write(&conns[0]) && ble_app_can_write(&conns[1]));
+    conns[0].handle = BLE_APP_NO_CONN;
     CHECK(!ble_app_can_write(&conns[0]) && ble_app_can_write(&conns[1]));
-    conns[1].handle = BLE_APP_NO_CONN;
-    CHECK(!ble_app_can_write(&conns[0])); // An observer stays read-only when alone.
-    CHECK(ble_app_has_receivers(conns)); // The remaining observer still streams.
-    conns[1].handle = 7;
-    conns[1].read_only = true;
-    CHECK(!ble_app_can_write(&conns[0]) && !ble_app_can_write(&conns[1]));
+    CHECK(ble_app_has_receivers(conns));
+    conns[1].encrypted = false;
+    CHECK(!ble_app_can_write(&conns[1]) && !ble_app_has_receivers(conns));
+    conns[1].encrypted = true;
+    conns[0].handle = 0;
     CHECK(ble_app_can_receive(&conns[0]) && ble_app_can_receive(&conns[1]));
-    conns[0].read_only = false;
-    CHECK(ble_app_can_write(&conns[0]) && !ble_app_can_write(&conns[1]));
-    conns[1].read_only = false;
     CHECK(ble_app_can_write(&conns[0]) && ble_app_can_write(&conns[1]));
 
     // Three wire frames, with timestamp/bus/address bytes distinct per frame.

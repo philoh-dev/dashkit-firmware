@@ -11,7 +11,6 @@ typedef struct {
     uint16_t handle;
     bool encrypted;
     bool subscribed;
-    bool read_only;
     bool peer_was_bonded;
     bool ping_seen;
     bool pending_connect;
@@ -32,16 +31,10 @@ static inline bool ble_app_has_receivers(const ble_app_conn_t *conns)
     return false;
 }
 
-// Write permission belongs to each connection, independently of subscriptions
-// and of the other client's role.
+// Each encrypted connection may write, independently of subscriptions.
 static inline bool ble_app_can_write(const ble_app_conn_t *conn)
 {
-#if CONFIG_DASHKIT_READ_ONLY
-    (void)conn;
-    return false;
-#else
-    return conn->handle != BLE_APP_NO_CONN && conn->encrypted && !conn->read_only;
-#endif
+    return conn->handle != BLE_APP_NO_CONN && conn->encrypted;
 }
 
 // Validate a complete DashPilot CAN batch before sending any of its frames.

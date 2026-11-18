@@ -1,4 +1,3 @@
-#include "sdkconfig.h"
 #include "can_manager.h"
 #include "can_filter.h"
 #include "automation_manager.h"
@@ -102,11 +101,6 @@ esp_err_t can_manager_receive(can_tagged_frame_t *frame, uint32_t timeout_ms)
 
 esp_err_t can_manager_send(uint8_t bus_id, const can_frame_t *frame)
 {
-#if CONFIG_DASHKIT_READ_ONLY
-    (void)bus_id;
-    (void)frame;
-    return ESP_ERR_NOT_SUPPORTED;
-#else
     if (!frame) return ESP_ERR_INVALID_ARG;
     for (int i = 0; i < s_iface_count; i++) {
         if (s_interfaces[i]->bus_id == bus_id) {
@@ -116,7 +110,6 @@ esp_err_t can_manager_send(uint8_t bus_id, const can_frame_t *frame)
     }
     ESP_LOGW(TAG, "send: no interface for bus_id=%d", bus_id);
     return ESP_ERR_NOT_FOUND;
-#endif
 }
 
 esp_err_t can_manager_inject(const can_tagged_frame_t *frame)
