@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <string.h>
 
+int64_t g_fake_time_us;   // esp_timer shim clock
+
 // ---- can_manager stub (records the last sent frame) ----
 static can_frame_t s_last_sent;
 static int         s_sent_count;
@@ -68,6 +70,22 @@ static dbc_sig_t sig(const char *m, const char *s)
 int main(void)
 {
     dbc_init();
+
+    // Filter-only ambient candidate must reach BLE on Vehicle CAN only.
+    {
+        for (unsigned bus = 0; bus < DBC_HW_FILTER_BUS_COUNT; bus++) {
+            unsigned matches = 0;
+            const dbc_hw_filter_set_t *fs = &g_dbc_hw_filters[bus];
+            for (unsigned i = 0; i < fs->count; i++) {
+                if (fs->ids[i] == 0x679) matches++;
+            }
+            CHECK(matches == (bus == 1 ? 1u : 0u) && fs->count <= 32,
+                  "ambient RX filter bus %u: %u matches, %u slots",
+                  bus, matches, fs->count);
+        }
+        CHECK(dbc_msg("UI_ambientLightingCtrls") == DBC_MSG_INVALID,
+              "ambient candidate remains filter-only");
+    }
 
     // 1. Charge port open = bit0 of byte0 on a zeroed UI_chargeRequest.
     {
@@ -171,6 +189,19 @@ int main(void)
         can_send(1, "SCCM_leftStalk", "SCCM_washWipeButtonStatus", 1, false);
         int64_t c = dbc_unpack(s_last_sent.data, sig("SCCM_leftStalk", "SCCM_leftStalkCounter"));
         CHECK(c == 10, "seed 9 then send -> counter %d (want 10)", (int)c);
+    }
+
+    // 10. Freshness: a cached frame counts as fresh only within max_age_ms.
+    {
+        uint8_t d[3] = {0};
+        g_fake_time_us = 10 * 1000 * 1000;
+        set_live(0x249, 3, d);
+        g_fake_time_us += 400 * 1000;
+        CHECK(can_msg_fresh("SCCM_leftStalk", 500), "400 ms old frame should be fresh");
+        g_fake_time_us += 200 * 1000;
+        CHECK(!can_msg_fresh("SCCM_leftStalk", 500), "600 ms old frame should be stale");
+        CHECK(!can_msg_fresh("EPBR_internalStatus", 500), "never-seen message should not be fresh");
+        CHECK(!can_msg_fresh("NoSuchMessage", 500), "unknown message should not be fresh");
     }
 
     printf("\n%s\n", g_fail ? "TESTS FAILED" : "ALL TESTS PASSED");
