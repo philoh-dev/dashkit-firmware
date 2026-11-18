@@ -14,16 +14,8 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ matrix.variant }}
+    name: Build firmware
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: read-write
-            read_only: 'n'
-          - variant: read-only
-            read_only: 'y'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,34 +27,23 @@ jobs:
         run: ./esp-idf/install.sh esp32s3
 
       - name: Build application and USB flash image
-        env:
-          READ_ONLY: ${{ matrix.read_only }}
         run: |
           . ./esp-idf/export.sh
-          printf 'CONFIG_DASHKIT_READ_ONLY=%s\n' "$READ_ONLY" > sdkconfig.release
-          idf.py -D SDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.release' build
-          # Fail rather than publish a mislabeled variant if configuration drifts.
-          if [[ "$READ_ONLY" == 'y' ]]; then
-            grep -qx 'CONFIG_DASHKIT_READ_ONLY=y' sdkconfig
-          else
-            grep -qx '# CONFIG_DASHKIT_READ_ONLY is not set' sdkconfig
-          fi
+          idf.py build
           idf.py merge-bin
 
       - name: Package binaries
-        env:
-          VARIANT: ${{ matrix.variant }}
         run: |
           mkdir -p dist
-          cp build/dashkit-firmware.bin "dist/dashkit-${VARIANT}.bin"
-          cp build/merged-binary.bin "dist/dashkit-${VARIANT}-usb.bin"
+          cp build/dashkit-firmware.bin dist/dashkit-firmware.bin
+          cp build/merged-binary.bin dist/dashkit-firmware-usb.bin
           cd dist
-          sha256sum ./*.bin > "SHA256SUMS-${VARIANT}.txt"
+          sha256sum ./*.bin > SHA256SUMS.txt
 
       - name: Save build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.variant }}
+          name: firmware
           path: dist/*
           if-no-files-found: error
           retention-days: 14
@@ -78,18 +59,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download both firmware variants
+      - name: Download firmware
         uses: actions/download-artifact@v4
         with:
-          pattern: firmware-*
+          name: firmware
           path: dist
-          merge-multiple: true
 
       - name: Verify checksums
         run: |
           cd dist
-          sha256sum --check SHA256SUMS-read-write.txt
-          sha256sum --check SHA256SUMS-read-only.txt
+          sha256sum --check SHA256SUMS.txt
 
       - name: Generate release notes from commit messages
         run: |
